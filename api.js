@@ -5,22 +5,28 @@ const path = require("path");
 const cors = require("cors");
 
 const app = express();
-const port = 2000;
 
 app.use(express.json());
 app.use(cors());
 
+require('dotenv').config();
+var nodemailer = require('nodemailer');
+
+const port=process.env.PORT ||2000;  
 // Serve uploaded files
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Connect to MongoDB
+const mongoURL =process.env.DB_URL
 mongoose
-  .connect("mongodb://localhost:27017/BlogPost", {
+  .connect(mongoURL, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
   })
   .then(() => console.log("Connected to MongoDB"))
   .catch((err) => console.error("Failed to connect to MongoDB", err));
+
+
 
 // Define the BlogPost Schema
 const blogPostSchema = new mongoose.Schema({
@@ -254,6 +260,64 @@ app.get("/subscribers", async (req, res) => {
     res.status(500).json({ message: "Server error", error });
   }
 });
+const UserSchema = new mongoose.Schema({
+  email: { type: String, unique: true },
+  resetCode: String,
+  createdAt: { type: Date, default: Date.now, expires: 300 }, // Code expires in 5 minutes
+});
+
+const forget = mongoose.model("forget", UserSchema);
+
+// Function to generate a random 4-digit code
+function getCode() {
+  return `${Math.floor(Math.random() * 10000)}`.padStart(4, "0");
+}
+
+// Forget Password Route
+app.post("/forgetpassword", async (req, res) => {
+  try {
+    let { email } = req.body;
+    let code = getCode();
+
+    // Upsert (Insert or Update) in MongoDB
+    await forget.findOneAndUpdate(
+      { email: email },
+      { resetCode: code, createdAt: new Date() },
+      { upsert: true, new: true }
+    );
+
+    // Email Configuration
+    var transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: "marmeting@gmail.com",
+        pass: "lulg vztu tzhu lyfk",
+      },
+    });
+
+    var mailOptions = {
+      from: "marmeting@gmail.com",
+      to: email,
+      subject: "Password Reset Code",
+      text: `Your password reset code is: ${code}`,
+    };
+
+    // Send Email
+    transporter.sendMail(mailOptions, function (error, info) {
+      if (error) {
+        console.log(error);
+        return res.status(500).json({ message: "Email sending failed" });
+      } else {
+        console.log("Email sent: " + info.response);
+        return res.json({ message: "Reset code sent successfully" });
+      }
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // Start the server
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
